@@ -1,15 +1,12 @@
-name: Test & Coverage
+name: CI Coverage
 
 on:
   push:
-    branches: [main, dev, research, 'research/**']
+    branches: [ main ]
   pull_request:
 
-permissions:
-  contents: read
-
 jobs:
-  test:
+  coverage:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -21,6 +18,11 @@ jobs:
           go-version-file: 'go.mod'
           cache: true
 
+      - name: Stub docs package
+        run: |
+          mkdir -p docs
+          printf 'package docs\n' > docs/docs.go
+
       - name: Run tests with atomic coverage
         run: go test ./... -race -count=1 -coverpkg=./... -coverprofile=coverage.out -covermode=atomic
 
@@ -29,7 +31,7 @@ jobs:
         with:
           config: ./.testcoverage.yml
 
-      - name: Upload to Codecov
+      - name: Upload to Codecov (Visual Dashboard & PR annotations)
         uses: codecov/codecov-action@v4
         with:
           files: coverage.out
