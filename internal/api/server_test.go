@@ -281,64 +281,48 @@ func TestIngest_MalformedFIEIsDroppedNotCrashed(t *testing.T) {
 	}
 }
 
-// TestIngest_ConversionErrorIsDroppedNotCrashed covers modelFIEToAPI's own
-// range check specifically — an out-of-range IPVersion passes
-// FromProto's validation (proto3 enums accept any int32) and only fails
-// at the narrowing conversion.
+// TestIngest_ConversionErrorIsDroppedNotCrashed covers modelFIEToAPI's
+// range checks: out-of-range enum values pass FromProto's validation
+// (proto3 enums accept any int32) and only fail at the narrowing
+// conversion to uint8.
 func TestIngest_ConversionErrorIsDroppedNotCrashed(t *testing.T) {
 	t.Parallel()
-	s := newIngestTestServer(t)
 
-	sub := s.ring.NewSubscriber()
-	defer sub.Close()
-
-	bad := validWireFIE(1)
-	bad.IpVersion = wire.IPVersion(256) // out of uint8 range
-	conn := dialIngest(t, s, bad)
-	defer conn.Close()
-
-	if err := framing.Send(conn, time.Second, validWireFIE(2)); err != nil {
-		t.Fatalf("failed to send the valid FIE: %v", err)
+	tests := []struct {
+		name   string
+		mutate func(*wire.ForwardingInfoElement)
+	}{
+		{"ip version", func(f *wire.ForwardingInfoElement) { f.IpVersion = wire.IPVersion(256) }},
+		{"protocol", func(f *wire.ForwardingInfoElement) { f.Protocol = wire.Protocol(256) }},
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	got, _, err := sub.Pop(ctx)
-	if err != nil {
-		t.Fatalf("did not receive the valid FIE after a conversion-error FIE: %v", err)
-	}
-	if got.ProbingDirectiveID != 2 {
-		t.Errorf("expected only the valid FIE (ID 2), got %d", got.ProbingDirectiveID)
-	}
-}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			s := newIngestTestServer(t)
 
-// TestIngest_ProtocolConversionErrorIsDroppedNotCrashed mirrors the
-// IPVersion case above for the Protocol field specifically — both are
-// separate range checks in modelFIEToAPI.
-func TestIngest_ProtocolConversionErrorIsDroppedNotCrashed(t *testing.T) {
-	t.Parallel()
-	s := newIngestTestServer(t)
+			sub := s.ring.NewSubscriber()
+			defer sub.Close()
 
-	sub := s.ring.NewSubscriber()
-	defer sub.Close()
+			bad := validWireFIE(1)
+			tt.mutate(bad)
+			conn := dialIngest(t, s, bad)
+			defer conn.Close()
 
-	bad := validWireFIE(1)
-	bad.Protocol = wire.Protocol(256) // out of uint8 range
-	conn := dialIngest(t, s, bad)
-	defer conn.Close()
+			if err := framing.Send(conn, time.Second, validWireFIE(2)); err != nil {
+				t.Fatalf("failed to send the valid FIE: %v", err)
+			}
 
-	if err := framing.Send(conn, time.Second, validWireFIE(2)); err != nil {
-		t.Fatalf("failed to send the valid FIE: %v", err)
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	got, _, err := sub.Pop(ctx)
-	if err != nil {
-		t.Fatalf("did not receive the valid FIE after a conversion-error FIE: %v", err)
-	}
-	if got.ProbingDirectiveID != 2 {
-		t.Errorf("expected only the valid FIE (ID 2), got %d", got.ProbingDirectiveID)
+			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+			defer cancel()
+			got, _, err := sub.Pop(ctx)
+			if err != nil {
+				t.Fatalf("did not receive the valid FIE after a conversion-error FIE: %v", err)
+			}
+			if got.ProbingDirectiveID != 2 {
+				t.Errorf("expected only the valid FIE (ID 2), got %d", got.ProbingDirectiveID)
+			}
+		})
 	}
 }
 
