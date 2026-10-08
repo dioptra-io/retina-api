@@ -3,10 +3,10 @@
 help:
 	@echo "Valid targets:"
 	@echo "  build       - Format, lint, generate docs, and build retina-api binary"
-	@echo "  lint        - Format code and run linters"
+	@echo "  lint        - Generate docs, format code and run linters"
 	@echo "  fmt         - Format code"
 	@echo "  tidy        - Tidy go modules"
-	@echo "  test        - Run tests with race detection and generate coverage profile"
+	@echo "  test        - Generate docs, run tests with race detection and generate coverage profile"
 	@echo "  cover       - View test coverage in browser"
 	@echo "  docs        - Generate Swagger documentation"
 	@echo "  clean       - Remove built binaries and coverage files"
@@ -15,7 +15,7 @@ help:
 build: docs lint
 	go build -o retina-api .
 
-lint: fmt
+lint: fmt docs
 	golangci-lint run
 
 fmt:
@@ -24,8 +24,8 @@ fmt:
 tidy:
 	go mod tidy
 
-test:
-	go test -v -race -coverprofile=coverage.out ./...
+test: docs
+	go test -v -race -count=1 -coverpkg=./... -coverprofile=coverage.out -covermode=atomic ./...
 
 cover:
 	go tool cover -html=coverage.out
