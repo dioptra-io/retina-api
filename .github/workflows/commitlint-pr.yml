@@ -1,0 +1,50 @@
+name: Validate Commit Messages
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+jobs:
+  commit-validation:
+    name: Enforce Commit Format & Sign-off
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Validate PR commits using local hook
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          chmod +x .githooks/commit-msg
+
+          mapfile -t commits < <(
+            git rev-list --reverse "$BASE_SHA..$HEAD_SHA" --no-merges
+          )
+
+          for commit in "${commits[@]}"; do
+            echo "Checking commit $commit..."
+            message_file="$(mktemp)"
+
+            git log --format=%B -n 1 "$commit" > "$message_file"
+
+            if ! ./.githooks/commit-msg "$message_file"; then
+              echo "Please fix the commit using 'git rebase -i' and force-push."
+              exit 1
+            fi
+
+            rm -f "$message_file"
+          done
+
+          echo "All commits comply with the rules."
