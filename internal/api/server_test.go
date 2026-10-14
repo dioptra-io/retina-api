@@ -408,6 +408,111 @@ func TestStream_ReceivesPushedFIE(t *testing.T) {
 	}
 }
 
+// TestStream_SubscribersGetTheirOwnSequenceNumbers streams the same FIEs to
+// two subscribers whose sequence numbers differ (the early one has already
+// read 5 FIEs when the late one joins). Ring entries are shared, so a
+// handler that stamps the sequence number onto the shared entry would
+// corrupt the other subscriber's numbers (and trips the race detector).
+func TestStream_SubscribersGetTheirOwnSequenceNumbers(t *testing.T) {
+	t.Parallel()
+	metrics := testMetrics()
+	ring, err := NewRingBuffer[SequencedFIE](1000)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := &Server{ring: ring, metrics: metrics, logger: discardLogger()}
+
+	ts := httptest.NewServer(http.HandlerFunc(s.handleStream))
+	defer ts.Close()
+
+	const early, late = 205, 200
+
+	earlyCh := streamSequences(ts, early)
+	waitForGauge(t, metrics.SubscribersActive, 1)
+	pushEmptyFIEs(ring, 5)
+	waitForDrained(t, ring)
+
+	lateCh := streamSequences(ts, late)
+	waitForGauge(t, metrics.SubscribersActive, 2)
+	pushEmptyFIEs(ring, late)
+
+	requireSequence(t, "early", earlyCh, early)
+	requireSequence(t, "late", lateCh, late)
+}
+
+func pushEmptyFIEs(ring *RingBuffer[SequencedFIE], n int) {
+	for i := 0; i < n; i++ {
+		ring.Push(&SequencedFIE{})
+	}
+}
+
+// waitForDrained blocks until every subscriber has popped everything pushed
+// so far.
+func waitForDrained(t *testing.T, ring *RingBuffer[SequencedFIE]) {
+	t.Helper()
+	drained := func() bool {
+		ring.mutex.Lock()
+		defer ring.mutex.Unlock()
+		for sub := range ring.subscribers {
+			if sub.tail != ring.head {
+				return false
+			}
+		}
+		return true
+	}
+	deadline := time.Now().Add(time.Second)
+	for !drained() {
+		if time.Now().After(deadline) {
+			t.Fatal("subscribers did not drain the pushed FIEs")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// streamSequences connects to the stream and delivers the sequence numbers
+// of the first n FIEs it receives (nil if the connection fails).
+func streamSequences(ts *httptest.Server, n int) <-chan []uint64 {
+	ch := make(chan []uint64, 1)
+	go func() {
+		resp, err := http.Get(ts.URL) //nolint:noctx
+		if err != nil {
+			ch <- nil
+			return
+		}
+		defer resp.Body.Close()
+		dec := json.NewDecoder(resp.Body)
+		seqs := make([]uint64, 0, n)
+		for len(seqs) < n {
+			var fie SequencedFIE
+			if err := dec.Decode(&fie); err != nil {
+				break
+			}
+			seqs = append(seqs, fie.SequenceNumber)
+		}
+		ch <- seqs
+	}()
+	return ch
+}
+
+// requireSequence checks that the stream delivered want FIEs numbered
+// 0..want-1.
+func requireSequence(t *testing.T, name string, ch <-chan []uint64, want int) {
+	t.Helper()
+	select {
+	case seqs := <-ch:
+		if len(seqs) != want {
+			t.Fatalf("%s subscriber: got %d FIEs, want %d", name, len(seqs), want)
+		}
+		for i, seq := range seqs {
+			if seq != uint64(i) {
+				t.Fatalf("%s subscriber: FIE %d has sequence number %d, want %d", name, i, seq, i)
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s subscriber did not receive all FIEs in time", name)
+	}
+}
+
 // noFlushWriter wraps http.ResponseWriter without exposing Flush, even if
 // the underlying value has it — embedding an interface only promotes that
 // interface's own methods, not the concrete value's extra ones.

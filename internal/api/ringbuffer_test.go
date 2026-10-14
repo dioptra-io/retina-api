@@ -285,6 +285,36 @@ func TestClose_PopAfterClose(t *testing.T) {
 	}
 }
 
+// --- Pending ---
+
+func TestPending(t *testing.T) {
+	t.Parallel()
+	rb, _ := NewRingBuffer[int](4)
+	sub := rb.NewSubscriber()
+
+	if sub.Pending() {
+		t.Fatal("expected nothing pending on an empty buffer")
+	}
+
+	v := 1
+	rb.Push(&v)
+	if !sub.Pending() {
+		t.Fatal("expected an element pending after Push")
+	}
+
+	if _, _, err := sub.Pop(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if sub.Pending() {
+		t.Fatal("expected nothing pending after draining")
+	}
+
+	sub.Close()
+	if sub.Pending() {
+		t.Fatal("expected nothing pending on a closed subscriber")
+	}
+}
+
 // --- Skipped ---
 
 func TestSkipped_InitiallyZero(t *testing.T) {

@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // @title			IP Routes Live API
-// @version		2.0.0
-// @description	Streams forwarding info elements (FIEs) collected by Retina agents, as newline-delimited JSON.
+// @version		1.0.0
+// @description	Streams forwarding info elements collected by Retina agents.
 // @host			iprl.dioptra.io
 // @BasePath		/api/v1
 package main
@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof" //nolint:gosec // G108: served on the internal-only metrics listener, not the public one
 	"os"
 	"os/signal"
 	"strconv"
@@ -44,7 +45,7 @@ func run() error {
 		readHeaderTimeout = flag.Duration("read-header-timeout", envOrDefaultDuration("RETINA_API_READ_HEADER_TIMEOUT", 5*time.Second), "Timeout for reading HTTP request headers on the public listener (ingest is raw TCP, unaffected)")
 
 		ingestAddr   = flag.String("ingest-addr", envOrDefault("RETINA_API_INGEST_ADDR", "127.0.0.1:8123"), "Ingest listener for the orchestrator")
-		ringCapacity = flag.Int("ring-capacity", envOrDefaultInt("RETINA_API_RING_CAPACITY", 100), "Ring buffer capacity")
+		ringCapacity = flag.Int("ring-capacity", envOrDefaultInt("RETINA_API_RING_CAPACITY", api.DefaultRingCapacity), "Ring buffer capacity")
 
 		logLevel = flag.String("log-level", envOrDefault("RETINA_API_LOG_LEVEL", "info"), "Log level (debug, info, warn, error)")
 	)
@@ -101,6 +102,11 @@ func startMetricsServer(logger *slog.Logger, registry *prometheus.Registry, addr
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	//nolint:gosec // G112: metrics endpoint is internal-only; timeout omitted intentionally
 	srv := &http.Server{Handler: mux}

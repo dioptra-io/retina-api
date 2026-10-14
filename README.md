@@ -66,7 +66,7 @@ make test
   --public-addr=0.0.0.0:8080 \
   --ingest-addr=0.0.0.0:8123 \
   --metrics-addr=127.0.0.1:9312 \
-  --ring-capacity=100 \
+  --ring-capacity=100000 \
   --log-level=info
 ```
 
@@ -83,11 +83,13 @@ curl -N http://localhost:8080/api/v1/stream
 | `--public-addr`         | `127.0.0.1:8080` | Public HTTP listener address (stream and Swagger UI)                                |
 | `--ingest-addr`         | `127.0.0.1:8123` | Raw TCP listener address for the orchestrator's FIE connection                      |
 | `--metrics-addr`        | `127.0.0.1:9312` | Address to expose Prometheus metrics on (internal only)                             |
-| `--ring-capacity`       | `100`            | Ring buffer capacity: how many FIEs a slow subscriber can lag behind before skipping |
+| `--ring-capacity`       | `100000`         | Ring buffer capacity: how many FIEs a slow subscriber can lag behind before skipping |
 | `--read-header-timeout` | `5s`             | Timeout for reading HTTP request headers on the public listener                     |
 | `--log-level`           | `info`           | Log level (`debug`, `info`, `warn`, `error`)                                        |
 
 All addresses default to loopback, so the service isn't reachable from outside the host until you bind it explicitly.
+
+FIEs reach the ring in bursts, so a small ring makes subscribers skip even when they keep up on average. The default of 100000 is about 8 seconds of lag per subscriber at roughly 12,000 FIEs/s; each entry is a few hundred bytes, so memory is tens of MB. A subscriber that falls further behind skips ahead, counted in `retina_api_subscriber_skipped_total`.
 
 ## Environment Variables
 
@@ -104,7 +106,7 @@ CLI flags > environment variables > hardcoded defaults
 | `RETINA_API_PUBLIC_ADDR`          | `127.0.0.1:8080` | Public HTTP listener address                                 |
 | `RETINA_API_INGEST_ADDR`          | `127.0.0.1:8123` | Raw TCP listener address for the orchestrator                |
 | `RETINA_API_METRICS_ADDR`         | `127.0.0.1:9312` | Address to expose Prometheus metrics on                      |
-| `RETINA_API_RING_CAPACITY`        | `100`            | Ring buffer capacity                                         |
+| `RETINA_API_RING_CAPACITY`        | `100000`         | Ring buffer capacity                                         |
 | `RETINA_API_READ_HEADER_TIMEOUT`  | `5s`             | Timeout for reading HTTP request headers (public listener)   |
 | `RETINA_API_LOG_LEVEL`            | `info`           | Log level (`debug`, `info`, `warn`, `error`)                 |
 
@@ -143,7 +145,7 @@ Metrics are exposed at `--metrics-addr` (default `127.0.0.1:9312`) in Prometheus
 - `retina_api_subscriber_skipped_total`: FIEs subscribers missed because they fell behind the ring buffer
 - `retina_api_ingest_connection_up`: whether an orchestrator connection is currently open
 
-See `internal/api/metrics.go` for the full list.
+See `internal/api/metrics.go` for the full list. Go's `pprof` profiling endpoints are served on the same listener under `/debug/pprof/`.
 
 ## License
 
