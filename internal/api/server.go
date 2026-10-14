@@ -31,6 +31,11 @@ type SequencedFIE struct {
 	SequenceNumber uint64 `json:"sequence_number"`
 }
 
+// DefaultRingCapacity is sized for the production ingest rate: FIEs arrive in
+// bursts, and a small ring makes subscribers skip even when they keep up on
+// average. 100000 entries is about 8 seconds at 12,000 FIEs/s.
+const DefaultRingCapacity = 100000
+
 // streamFlushInterval bounds how long a streamed FIE can sit in the HTTP
 // buffer while the subscriber is busy.
 const streamFlushInterval = 10 * time.Millisecond
@@ -78,7 +83,7 @@ func NewServer(config *ServerConfig) (*Server, error) {
 
 	capacity := config.RingCapacity
 	if capacity <= 0 {
-		capacity = 500
+		capacity = DefaultRingCapacity
 	}
 	ring, err := NewRingBuffer[SequencedFIE](capacity)
 	if err != nil {

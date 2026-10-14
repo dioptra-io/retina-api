@@ -45,7 +45,7 @@ func run() error {
 		readHeaderTimeout = flag.Duration("read-header-timeout", envOrDefaultDuration("RETINA_API_READ_HEADER_TIMEOUT", 5*time.Second), "Timeout for reading HTTP request headers on the public listener (ingest is raw TCP, unaffected)")
 
 		ingestAddr   = flag.String("ingest-addr", envOrDefault("RETINA_API_INGEST_ADDR", "127.0.0.1:8123"), "Ingest listener for the orchestrator")
-		ringCapacity = flag.Int("ring-capacity", envOrDefaultInt("RETINA_API_RING_CAPACITY", 100), "Ring buffer capacity")
+		ringCapacity = flag.Int("ring-capacity", envOrDefaultInt("RETINA_API_RING_CAPACITY", api.DefaultRingCapacity), "Ring buffer capacity")
 
 		logLevel = flag.String("log-level", envOrDefault("RETINA_API_LOG_LEVEL", "info"), "Log level (debug, info, warn, error)")
 	)

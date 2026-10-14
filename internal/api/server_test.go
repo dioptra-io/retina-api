@@ -425,11 +425,31 @@ func TestStream_SubscribersGetTheirOwnSequenceNumbers(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(s.handleStream))
 	defer ts.Close()
 
-	push := func(n int) {
-		for i := 0; i < n; i++ {
-			ring.Push(&SequencedFIE{})
-		}
+	const early, late = 205, 200
+
+	earlyCh := streamSequences(ts, early)
+	waitForGauge(t, metrics.SubscribersActive, 1)
+	pushEmptyFIEs(ring, 5)
+	waitForDrained(t, ring)
+
+	lateCh := streamSequences(ts, late)
+	waitForGauge(t, metrics.SubscribersActive, 2)
+	pushEmptyFIEs(ring, late)
+
+	requireSequence(t, "early", earlyCh, early)
+	requireSequence(t, "late", lateCh, late)
+}
+
+func pushEmptyFIEs(ring *RingBuffer[SequencedFIE], n int) {
+	for i := 0; i < n; i++ {
+		ring.Push(&SequencedFIE{})
 	}
+}
+
+// waitForDrained blocks until every subscriber has popped everything pushed
+// so far.
+func waitForDrained(t *testing.T, ring *RingBuffer[SequencedFIE]) {
+	t.Helper()
 	drained := func() bool {
 		ring.mutex.Lock()
 		defer ring.mutex.Unlock()
@@ -440,59 +460,56 @@ func TestStream_SubscribersGetTheirOwnSequenceNumbers(t *testing.T) {
 		}
 		return true
 	}
-	stream := func(n int) <-chan []uint64 {
-		ch := make(chan []uint64, 1)
-		go func() {
-			resp, err := http.Get(ts.URL) //nolint:noctx
-			if err != nil {
-				ch <- nil
-				return
-			}
-			defer resp.Body.Close()
-			dec := json.NewDecoder(resp.Body)
-			seqs := make([]uint64, 0, n)
-			for len(seqs) < n {
-				var fie SequencedFIE
-				if err := dec.Decode(&fie); err != nil {
-					break
-				}
-				seqs = append(seqs, fie.SequenceNumber)
-			}
-			ch <- seqs
-		}()
-		return ch
-	}
-
-	const early, late = 205, 200
-
-	earlyCh := stream(early)
-	waitForGauge(t, metrics.SubscribersActive, 1)
-	push(5)
-	for deadline := time.Now().Add(time.Second); !drained(); {
+	deadline := time.Now().Add(time.Second)
+	for !drained() {
 		if time.Now().After(deadline) {
-			t.Fatal("early subscriber did not drain the first FIEs")
+			t.Fatal("subscribers did not drain the pushed FIEs")
 		}
 		time.Sleep(5 * time.Millisecond)
 	}
+}
 
-	lateCh := stream(late)
-	waitForGauge(t, metrics.SubscribersActive, 2)
-	push(late)
-
-	for name, ch := range map[string]<-chan []uint64{"early": earlyCh, "late": lateCh} {
-		select {
-		case seqs := <-ch:
-			for i, seq := range seqs {
-				if seq != uint64(i) {
-					t.Fatalf("%s subscriber: FIE %d has sequence number %d, want %d", name, i, seq, i)
-				}
-			}
-			if want := map[string]int{"early": early, "late": late}[name]; len(seqs) != want {
-				t.Fatalf("%s subscriber: got %d FIEs, want %d", name, len(seqs), want)
-			}
-		case <-time.After(5 * time.Second):
-			t.Fatalf("%s subscriber did not receive all FIEs in time", name)
+// streamSequences connects to the stream and delivers the sequence numbers
+// of the first n FIEs it receives (nil if the connection fails).
+func streamSequences(ts *httptest.Server, n int) <-chan []uint64 {
+	ch := make(chan []uint64, 1)
+	go func() {
+		resp, err := http.Get(ts.URL) //nolint:noctx
+		if err != nil {
+			ch <- nil
+			return
 		}
+		defer resp.Body.Close()
+		dec := json.NewDecoder(resp.Body)
+		seqs := make([]uint64, 0, n)
+		for len(seqs) < n {
+			var fie SequencedFIE
+			if err := dec.Decode(&fie); err != nil {
+				break
+			}
+			seqs = append(seqs, fie.SequenceNumber)
+		}
+		ch <- seqs
+	}()
+	return ch
+}
+
+// requireSequence checks that the stream delivered want FIEs numbered
+// 0..want-1.
+func requireSequence(t *testing.T, name string, ch <-chan []uint64, want int) {
+	t.Helper()
+	select {
+	case seqs := <-ch:
+		if len(seqs) != want {
+			t.Fatalf("%s subscriber: got %d FIEs, want %d", name, len(seqs), want)
+		}
+		for i, seq := range seqs {
+			if seq != uint64(i) {
+				t.Fatalf("%s subscriber: FIE %d has sequence number %d, want %d", name, i, seq, i)
+			}
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatalf("%s subscriber did not receive all FIEs in time", name)
 	}
 }
 
