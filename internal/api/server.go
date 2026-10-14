@@ -31,6 +31,10 @@ type SequencedFIE struct {
 	SequenceNumber uint64 `json:"sequence_number"`
 }
 
+// streamFlushInterval bounds how long a streamed FIE can sit in the HTTP
+// buffer while the subscriber is busy.
+const streamFlushInterval = 10 * time.Millisecond
+
 // ServerConfig configures NewServer.
 type ServerConfig struct {
 	PublicAddress string
@@ -291,6 +295,7 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 	defer s.logger.Debug("Client disconnected", slog.String("remote_addr", r.RemoteAddr))
 
 	var lastSkipped uint64
+	lastFlush := time.Now()
 	for {
 		fie, seq, err := subscriber.Pop(r.Context())
 		if err != nil {
@@ -300,10 +305,18 @@ func (s *Server) handleStream(w http.ResponseWriter, r *http.Request) {
 			s.metrics.SubscriberSkippedTotal.Add(float64(skipped - lastSkipped))
 			lastSkipped = skipped
 		}
-		fie.SequenceNumber = seq
-		if err := enc.Encode(fie); err != nil {
+		// The ring entry is shared by all subscribers, and each has its own
+		// sequence number: encode a copy.
+		out := *fie
+		out.SequenceNumber = seq
+		if err := enc.Encode(&out); err != nil {
 			return
 		}
-		flusher.Flush()
+		// Flush per FIE is a syscall and a packet each; under load, batch
+		// them, but never leave data buffered before blocking in Pop.
+		if !subscriber.Pending() || time.Since(lastFlush) >= streamFlushInterval {
+			flusher.Flush()
+			lastFlush = time.Now()
+		}
 	}
 }

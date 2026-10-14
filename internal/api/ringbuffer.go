@@ -28,25 +28,41 @@ func (sub *subscriber[T]) Pop(ctx context.Context) (*T, uint64, error) {
 	if ctx.Err() != nil {
 		return nil, 0, ctx.Err()
 	}
-	// Wake waiting goroutines if this subscriber's context is canceled.
-	cond := sub.rb.cond
-	stop := context.AfterFunc(ctx, func() {
-		cond.Broadcast()
-	})
-	defer stop()
 	sub.rb.mutex.Lock()
 	defer sub.rb.mutex.Unlock()
-	for sub.tail == sub.rb.head {
-		if ctx.Err() != nil {
-			return nil, 0, ctx.Err()
+	if sub.tail == sub.rb.head {
+		// Registered only when we have to wait, so the hot path allocates
+		// nothing. The callback takes the lock so its Broadcast cannot land
+		// between the ctx.Err check and Wait below and be lost.
+		mu, cond := sub.rb.mutex, sub.rb.cond
+		stop := context.AfterFunc(ctx, func() {
+			mu.Lock()
+			defer mu.Unlock()
+			cond.Broadcast()
+		})
+		defer stop()
+		for sub.tail == sub.rb.head {
+			if ctx.Err() != nil {
+				return nil, 0, ctx.Err()
+			}
+			// Atomically release the lock and sleep. Reacquires the lock when woken.
+			cond.Wait()
 		}
-		// Atomically release the lock and sleep. Reacquires the lock when woken.
-		sub.rb.cond.Wait()
 	}
 	e := sub.rb.buffer[sub.tail]
 	sub.tail = (sub.tail + 1) % sub.rb.capacity
 	sub.seq++
 	return e, sub.seq - 1 + sub.Skipped(), nil
+}
+
+// Pending reports whether Pop would return without blocking.
+func (sub *subscriber[T]) Pending() bool {
+	if sub.rb == nil {
+		return false
+	}
+	sub.rb.mutex.Lock()
+	defer sub.rb.mutex.Unlock()
+	return sub.tail != sub.rb.head
 }
 
 // Close releases the subscriber. After Close, the subscriber's tail is no longer

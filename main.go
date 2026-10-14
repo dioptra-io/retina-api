@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 // @title			IP Routes Live API
-// @version		2.0.0
-// @description	Streams forwarding info elements (FIEs) collected by Retina agents, as newline-delimited JSON.
+// @version		1.0.0
+// @description	Streams forwarding info elements collected by Retina agents.
 // @host			iprl.dioptra.io
 // @BasePath		/api/v1
 package main
@@ -16,6 +16,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/http/pprof" //nolint:gosec // G108: served on the internal-only metrics listener, not the public one
 	"os"
 	"os/signal"
 	"strconv"
@@ -101,6 +102,11 @@ func startMetricsServer(logger *slog.Logger, registry *prometheus.Registry, addr
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 
 	//nolint:gosec // G112: metrics endpoint is internal-only; timeout omitted intentionally
 	srv := &http.Server{Handler: mux}
