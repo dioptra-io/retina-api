@@ -1,12 +1,13 @@
-name: CI Coverage
+name: Test & Coverage
 
 on:
   push:
-    branches: [ main ]
+    branches: [main, dev, research, 'research/**']
   pull_request:
 
 jobs:
-  coverage:
+  test:
+    name: Test & Coverage
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -31,7 +32,7 @@ jobs:
         with:
           config: ./.testcoverage.yml
 
-      - name: Upload to Codecov (Visual Dashboard & PR annotations)
+      - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
           files: coverage.out
