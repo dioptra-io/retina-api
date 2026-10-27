@@ -16,11 +16,11 @@ import (
 
 	httpSwagger "github.com/swaggo/http-swagger"
 
-	"github.com/dioptra-io/retina-commons/framing"
-	"github.com/dioptra-io/retina-commons/model"
-	wire "github.com/dioptra-io/retina-commons/wire/v2"
+	"github.com/dioptra-io/retina-commons/v2/framing"
+	"github.com/dioptra-io/retina-commons/v2/model"
+	wire "github.com/dioptra-io/retina-commons/v2/wire/v2"
 
-	"github.com/dioptra-io/retina-commons/api/v1"
+	"github.com/dioptra-io/retina-commons/v2/api/v1"
 )
 
 // SequencedFIE is a ForwardingInfoElement with a sequence number for ordered delivery to HTTP clients.

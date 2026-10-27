@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/dioptra-io/retina-commons/api/v1"
-	"github.com/dioptra-io/retina-commons/framing"
-	wire "github.com/dioptra-io/retina-commons/wire/v2"
+	"github.com/dioptra-io/retina-commons/v2/api/v1"
+	"github.com/dioptra-io/retina-commons/v2/framing"
+	wire "github.com/dioptra-io/retina-commons/v2/wire/v2"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 	"google.golang.org/protobuf/types/known/timestamppb"
